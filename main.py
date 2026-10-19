@@ -17,8 +17,8 @@ app.add_middleware(
 )
 
 MODEL_ID = os.getenv(
-    "HF_MODEL",
-    "Qwen/Qwen2.5-0.5B-Instruct"
+    "MODEL_ID",
+    "Qwen/Qwen3-4B-Instruct-2507"
 )
 
 

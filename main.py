@@ -1,3 +1,4 @@
+
 import os
 import json
 import urllib.request
@@ -18,12 +19,11 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.getenv(
     "GROQ_MODEL",
     "openai/gpt-oss-20b"
 )
-
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 class ChatRequest(BaseModel):
@@ -87,7 +87,9 @@ def chat(data: ChatRequest):
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "FRIDAY-AI/1.0"
         },
         method="POST"
     )
@@ -104,7 +106,10 @@ def chat(data: ChatRequest):
         choices = result.get("choices", [])
 
         if not choices:
-            raise ValueError("Groq вернул пустой список ответов")
+            raise HTTPException(
+                status_code=502,
+                detail="Groq вернул пустой список ответов."
+            )
 
         answer = choices[0].get(
             "message", {}
@@ -119,29 +124,46 @@ def chat(data: ChatRequest):
         error_body = exc.read().decode(
             "utf-8", errors="replace"
         )
+
         print(
             "Groq HTTP error:",
             exc.code,
             error_body[:1000]
         )
+
+        if exc.code == 401:
+            detail = "Groq отклонил API-ключ. Проверь GROQ_API_KEY."
+        elif exc.code == 403:
+            detail = (
+                "Groq или его защитная система заблокировали "
+                "запрос. Проверь Render Logs."
+            )
+        elif exc.code == 429:
+            detail = (
+                "Превышен лимит запросов Groq. "
+                "Попробуй позже."
+            )
+        else:
+            detail = f"Groq вернул HTTP {exc.code}."
+
         raise HTTPException(
             status_code=502,
-            detail=(
-                f"Groq API вернул ошибку HTTP {exc.code}. "
-                "Подробности доступны в логах сервера."
-            )
+            detail=detail
         ) from exc
 
     except urllib.error.URLError as exc:
         print("Groq connection error:", str(exc.reason))
         raise HTTPException(
             status_code=502,
-            detail="Не удалось подключиться к Groq API."
+            detail="Не удалось подключиться к Groq."
         ) from exc
+
+    except HTTPException:
+        raise
 
     except Exception as exc:
         print("Groq model error:", repr(exc))
         raise HTTPException(
             status_code=502,
-            detail="Не удалось получить ответ модели."
+            detail="Внутренняя ошибка обработки ответа модели."
         ) from exc

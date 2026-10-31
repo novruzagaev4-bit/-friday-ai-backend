@@ -336,3 +336,4 @@ def chat(data: ChatRequest):
             detail="Внутренняя ошибка F.R.I.D.A.Y."
         ) from exc
 
+

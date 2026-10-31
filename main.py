@@ -336,3 +336,52 @@ def chat(data: ChatRequest):
             status_code=502,
             detail="Внутренняя ошибка F.R.I.D.A.Y."
         ) from exc
+# ==============================
+# F.R.I.D.A.Y. VOICE ENGINE
+# ==============================
+
+@app.post("/tts")
+async def text_to_speech(data: ChatRequest):
+
+    text = data.message.strip()
+
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Текст для озвучки пустой."
+        )
+
+    try:
+        communicate = edge_tts.Communicate(
+            text,
+            voice="ru-RU-SvetlanaNeural",
+            rate="-5%",
+            pitch="-10Hz"
+        )
+
+        audio = bytearray()
+
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio.extend(chunk["data"])
+
+        if not audio:
+            raise HTTPException(
+                status_code=502,
+                detail="Не удалось создать аудио."
+            )
+
+        return Response(
+            content=bytes(audio),
+            media_type="audio/mpeg"
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        print("TTS error:", repr(exc))
+        raise HTTPException(
+            status_code=502,
+            detail="Ошибка голосового движка."
+        )

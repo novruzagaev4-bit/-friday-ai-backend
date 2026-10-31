@@ -15,14 +15,15 @@ app.add_middleware(
     allow_origins=[
         "https://friday-ai-interface.onrender.com"
     ],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = os.getenv(
-    "GROQ_MODEL",
-    "openai/gpt-oss-20b"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL",
+    "openrouter/free"
 )
 
 
@@ -35,13 +36,17 @@ def home():
     return {
         "name": "F.R.I.D.A.Y.",
         "status": "online",
-        "provider": "Groq"
+        "provider": "OpenRouter",
+        "model": OPENROUTER_MODEL
     }
 
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "provider": "OpenRouter"
+    }
 
 
 @app.post("/chat")
@@ -54,24 +59,26 @@ def chat(data: ChatRequest):
             detail="Сообщение пустое"
         )
 
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY")
 
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="На сервере не настроен GROQ_API_KEY"
+            detail="OPENROUTER_API_KEY не настроен"
         )
 
     payload = {
-        "model": GROQ_MODEL,
+        "model": OPENROUTER_MODEL,
         "messages": [
             {
                 "role": "system",
                 "content": (
-                    "Ты F.R.I.D.A.Y., персональный "
+                    "Ты F.R.I.D.A.Y. — персональный "
                     "ИИ-помощник. Отвечай на русском языке, "
-                    "конкретно и честно. Помогай развивать "
-                    "проект QADAM AI."
+                    "конкретно, грамотно и честно. "
+                    "Помогай с программированием, технологиями "
+                    "и развитием проекта QADAM AI. "
+                    "Сохраняй дружелюбный и профессиональный стиль."
                 )
             },
             {
@@ -79,17 +86,18 @@ def chat(data: ChatRequest):
                 "content": message
             }
         ],
-        "max_tokens": 300
+        "max_tokens": 500
     }
 
     request = urllib.request.Request(
-        GROQ_URL,
+        OPENROUTER_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "FRIDAY-AI/1.0"
+            "HTTP-Referer": "https://friday-ai-interface.onrender.com",
+            "X-OpenRouter-Title": "F.R.I.D.A.Y. AI"
         },
         method="POST"
     )
@@ -97,7 +105,7 @@ def chat(data: ChatRequest):
     try:
         with urllib.request.urlopen(
             request,
-            timeout=45
+            timeout=90
         ) as response:
             result = json.loads(
                 response.read().decode("utf-8")
@@ -108,17 +116,28 @@ def chat(data: ChatRequest):
         if not choices:
             raise HTTPException(
                 status_code=502,
-                detail="Groq вернул пустой список ответов."
+                detail="OpenRouter не вернул ответ модели."
             )
 
         answer = choices[0].get(
             "message", {}
         ).get("content")
 
+        if isinstance(answer, list):
+            answer = "".join(
+                item.get("text", "")
+                for item in answer
+                if isinstance(item, dict)
+            )
+
         if not answer:
             answer = "Модель не вернула текстовый ответ."
 
-        return {"reply": answer}
+        return {
+            "reply": answer,
+            "provider": "OpenRouter",
+            "model": result.get("model", OPENROUTER_MODEL)
+        }
 
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode(
@@ -126,25 +145,23 @@ def chat(data: ChatRequest):
         )
 
         print(
-            "Groq HTTP error:",
+            "OpenRouter HTTP error:",
             exc.code,
-            error_body[:1000]
+            error_body[:1500]
         )
 
         if exc.code == 401:
-            detail = "Groq отклонил API-ключ. Проверь GROQ_API_KEY."
+            detail = "Неверный или недействительный API-ключ."
+        elif exc.code == 402:
+            detail = "Недостаточно доступного баланса или квоты."
         elif exc.code == 403:
-            detail = (
-                "Groq или его защитная система заблокировали "
-                "запрос. Проверь Render Logs."
-            )
+            detail = "OpenRouter отклонил запрос. Проверь доступ."
+        elif exc.code == 404:
+            detail = "Запрошенная модель недоступна."
         elif exc.code == 429:
-            detail = (
-                "Превышен лимит запросов Groq. "
-                "Попробуй позже."
-            )
+            detail = "Превышен лимит запросов. Попробуй позже."
         else:
-            detail = f"Groq вернул HTTP {exc.code}."
+            detail = f"OpenRouter вернул HTTP {exc.code}."
 
         raise HTTPException(
             status_code=502,
@@ -152,18 +169,20 @@ def chat(data: ChatRequest):
         ) from exc
 
     except urllib.error.URLError as exc:
-        print("Groq connection error:", str(exc.reason))
+        print("OpenRouter connection error:", str(exc.reason))
+
         raise HTTPException(
             status_code=502,
-            detail="Не удалось подключиться к Groq."
+            detail="Не удалось подключиться к OpenRouter."
         ) from exc
 
     except HTTPException:
         raise
 
     except Exception as exc:
-        print("Groq model error:", repr(exc))
+        print("F.R.I.D.A.Y. error:", repr(exc))
+
         raise HTTPException(
             status_code=502,
-            detail="Внутренняя ошибка обработки ответа модели."
+            detail="Внутренняя ошибка обработки ответа."
         ) from exc
